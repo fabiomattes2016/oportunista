@@ -1,3 +1,4 @@
+require("dotenv").config;
 const Binance = require("binance-api-node").default;
 const { VWAP } = require("technicalindicators");
 const colors = require("colors");
@@ -10,21 +11,34 @@ const Balance = require("./models/balance");
 const Config = require("./models/config");
 const HistoricalBalance = require("./models/historicalBalance");
 
-const client = Binance({
-	apiKey: "BArztMUmBNHiWj8ipXPC106OwsxJzTOZ2M1JkcYbEguegAXpWgQS0sr0luCkpx8b",
-	apiSecret: "ywXVXL16sPEHJS9TbfxcLqNkrUDJKF1Hp5ETRuBgLLFByFsvF4LuD5Qh9FX4o090",
-	getTime: Date.now,
-	httpBase: "https://testnet.binance.vision",
-});
+const client = null;
 
-const baseAsset = "USDT"; // Moeda base (USDT)
-const tradingAsset = "BTC"; // Ativo de negociação (BTC)
+const environment = process.env.ENVIRONMENT;
+
+switch (environment) {
+	case "dev":
+		client = Binance({
+			apiKey: process.env.BINANCE_API_KEY,
+			apiSecret: process.env.BINANCE_API_SECRET,
+			getTime: Date.now,
+			httpBase: "https://testnet.binance.vision",
+		});
+	case "prod":
+		client = Binance({
+			apiKey: process.env.BINANCE_API_KEY,
+			apiSecret: process.env.BINANCE_API_SECRET,
+			getTime: Date.now,
+		});
+}
+
+const baseAsset = process.env.BASE_ASSET; // Moeda base (USDT)
+const tradingAsset = process.env.TRADING_ASSET; // Ativo de negociação (BTC)
 const tradingPair = `${tradingAsset}${baseAsset}`;
-const tradingAmount = 150; // Valor em USDT para compra e venda
+const tradingAmount = parseFloat(process.env.TRADING_AMOUNT); // Valor em USDT para compra e venda
 
 // Configuração do token do seu bot no Telegram
-const telegramToken = "6508123001:AAFhe4A7va4O3lvDfRFAoD9C7Rw8VGp9jQA";
-const chatId = "6660062274";
+const telegramToken = process.env.TELEGRAM_TOKEN;
+const chatId = process.env.CHAT_ID;
 const bot = new TelegramBot(telegramToken, { polling: false });
 
 // let hasBought = false; // Estado para controlar se o bot já realizou a compra
@@ -53,13 +67,10 @@ function isMidnight() {
 }
 
 async function startConfig() {
-	await mongoose.connect(
-		"mongodb+srv://fabiomattes:yT1zCqGZsOUAeIGs@cluster0.gocp9tw.mongodb.net/trade?retryWrites=true&w=majority",
-		{
-			useNewUrlParser: true,
-			useUnifiedTopology: true,
-		}
-	);
+	await mongoose.connect(process.env.DATABASE_URL, {
+		useNewUrlParser: true,
+		useUnifiedTopology: true,
+	});
 
 	const hasBought = {
 		name: "hasBought",
@@ -86,13 +97,10 @@ async function startConfig() {
 
 async function buy(currentPrice) {
 	try {
-		await mongoose.connect(
-			"mongodb+srv://fabiomattes:yT1zCqGZsOUAeIGs@cluster0.gocp9tw.mongodb.net/trade?retryWrites=true&w=majority",
-			{
-				useNewUrlParser: true,
-				useUnifiedTopology: true,
-			}
-		);
+		await mongoose.connect(process.env.DATABASE_URL, {
+			useNewUrlParser: true,
+			useUnifiedTopology: true,
+		});
 
 		const accountInfo = await client.accountInfo();
 		const baseAssetBalance = parseFloat(
@@ -445,13 +453,10 @@ function isBelowVWAPPercentage(currentPrice, vwap) {
 
 async function main() {
 	console.clear();
-	await mongoose.connect(
-		"mongodb+srv://fabiomattes:yT1zCqGZsOUAeIGs@cluster0.gocp9tw.mongodb.net/trade?retryWrites=true&w=majority",
-		{
-			useNewUrlParser: true,
-			useUnifiedTopology: true,
-		}
-	);
+	await mongoose.connect(process.env.DATABASE_URL, {
+		useNewUrlParser: true,
+		useUnifiedTopology: true,
+	});
 
 	const quoted = baseAsset;
 	const pair = tradingAsset;
