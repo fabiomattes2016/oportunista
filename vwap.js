@@ -1,4 +1,4 @@
-require("dotenv").config;
+require("dotenv").config();
 const Binance = require("binance-api-node").default;
 const { VWAP } = require("technicalindicators");
 const colors = require("colors");
@@ -11,7 +11,7 @@ const Balance = require("./models/balance");
 const Config = require("./models/config");
 const HistoricalBalance = require("./models/historicalBalance");
 
-const client = null;
+let client = null;
 
 const environment = process.env.ENVIRONMENT;
 
@@ -39,7 +39,9 @@ const tradingAmount = parseFloat(process.env.TRADING_AMOUNT); // Valor em USDT p
 // Configuração do token do seu bot no Telegram
 const telegramToken = process.env.TELEGRAM_TOKEN;
 const chatId = process.env.CHAT_ID;
-const bot = new TelegramBot(telegramToken, { polling: false });
+const bot = new TelegramBot(telegramToken, {
+	polling: true,
+});
 
 // let hasBought = false; // Estado para controlar se o bot já realizou a compra
 // let isWaitingForSell = false; // Estado para controlar se o bot está aguardando a venda
@@ -67,7 +69,7 @@ function isMidnight() {
 }
 
 async function startConfig() {
-	await mongoose.connect(process.env.DATABASE_URL, {
+	await mongoose.connect(`${process.env.DATABASE_URL}`, {
 		useNewUrlParser: true,
 		useUnifiedTopology: true,
 	});
@@ -97,7 +99,7 @@ async function startConfig() {
 
 async function buy(currentPrice) {
 	try {
-		await mongoose.connect(process.env.DATABASE_URL, {
+		await mongoose.connect(`${process.env.DATABASE_URL}`, {
 			useNewUrlParser: true,
 			useUnifiedTopology: true,
 		});
@@ -453,7 +455,7 @@ function isBelowVWAPPercentage(currentPrice, vwap) {
 
 async function main() {
 	console.clear();
-	await mongoose.connect(process.env.DATABASE_URL, {
+	await mongoose.connect(`${process.env.DATABASE_URL}`, {
 		useNewUrlParser: true,
 		useUnifiedTopology: true,
 	});
