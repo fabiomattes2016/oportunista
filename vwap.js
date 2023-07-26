@@ -25,7 +25,7 @@ const tradingAmount = 150; // Valor em USDT para compra e venda
 // Configuração do token do seu bot no Telegram
 const telegramToken = "6508123001:AAFhe4A7va4O3lvDfRFAoD9C7Rw8VGp9jQA";
 const chatId = "6660062274";
-const bot = new TelegramBot(telegramToken, { polling: true });
+const bot = new TelegramBot(telegramToken, { polling: false });
 
 // let hasBought = false; // Estado para controlar se o bot já realizou a compra
 // let isWaitingForSell = false; // Estado para controlar se o bot está aguardando a venda
