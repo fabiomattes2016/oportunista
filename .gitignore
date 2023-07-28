@@ -1,6 +1,7 @@
 .bot
 config.js
 initialHistoricalBalance.json
+startconfig.js
 
 # Logs
 logs
