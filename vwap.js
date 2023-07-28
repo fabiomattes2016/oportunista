@@ -5,31 +5,22 @@ const colors = require("colors");
 const mongoose = require("mongoose");
 const beep = require("beepbeep");
 const TelegramBot = require("node-telegram-bot-api");
+const notifier = require("node-notifier");
 
 const Order = require("./models/orders");
 const Balance = require("./models/balance");
 const Config = require("./models/config");
 const HistoricalBalance = require("./models/historicalBalance");
+const { getConfigurations } = require("./config.js");
 
-let client = null;
+// console.log(getConfigurations());
 
-const environment = process.env.ENVIRONMENT;
-
-switch (environment) {
-	case "dev":
-		client = Binance({
-			apiKey: process.env.BINANCE_API_KEY,
-			apiSecret: process.env.BINANCE_API_SECRET,
-			getTime: Date.now,
-			httpBase: "https://testnet.binance.vision",
-		});
-	case "prod":
-		client = Binance({
-			apiKey: process.env.BINANCE_API_KEY,
-			apiSecret: process.env.BINANCE_API_SECRET,
-			getTime: Date.now,
-		});
-}
+let client = Binance({
+	apiKey: `${process.env.BINANCE_API_KEY}`,
+	apiSecret: `${process.env.BINANCE_API_SECRET}`,
+	getTime: Date.now,
+	httpBase: "https://testnet.binance.vision",
+});
 
 const baseAsset = process.env.BASE_ASSET; // Moeda base (USDT)
 const tradingAsset = process.env.TRADING_ASSET; // Ativo de negociação (BTC)
@@ -48,6 +39,32 @@ const bot = new TelegramBot(telegramToken, {
 
 let buyPrice = 0;
 
+async function getBalances() {
+	const accountInfo = await client.accountInfo();
+
+	// USDT
+	const baseAssetBalance = parseFloat(
+		accountInfo.balances.find((asset) => asset.asset === baseAsset).free
+	);
+
+	// BTC
+	const tradingAssetBalance = parseFloat(
+		accountInfo.balances.find((asset) => asset.asset === tradingAsset).free
+	);
+
+	return {
+		tradeAsset: tradingAssetBalance.toFixed(4),
+		baseAsset: baseAssetBalance.toFixed(2),
+	};
+}
+
+async function getPrice() {
+	const ticker = await client.prices({ symbol: tradingPair });
+	const currentPrice = parseFloat(ticker[tradingPair]);
+
+	return currentPrice.toFixed(2);
+}
+
 function formatDateTime(date) {
 	const day = date.getDate().toString().padStart(2, "0");
 	const month = (date.getMonth() + 1).toString().padStart(2, "0");
@@ -65,36 +82,7 @@ function isMidnight() {
 	const minutes = now.getMinutes();
 	const seconds = now.getSeconds();
 
-	return hours === 0 && minutes === 0 && seconds === 0;
-}
-
-async function startConfig() {
-	await mongoose.connect(`${process.env.DATABASE_URL}`, {
-		useNewUrlParser: true,
-		useUnifiedTopology: true,
-	});
-
-	const hasBought = {
-		name: "hasBought",
-		value: false,
-	};
-
-	const isWaitingForSell = {
-		name: "isWaitingForSell",
-		value: false,
-	};
-
-	await Config.findOneAndUpdate({ name: "hasBought" }, hasBought, {
-		upsert: true,
-	});
-
-	await Config.findOneAndUpdate(
-		{ name: "isWaitingForSell" },
-		isWaitingForSell,
-		{
-			upsert: true,
-		}
-	);
+	return hours === 10 && minutes >= 0 && seconds <= 59;
 }
 
 async function buy(currentPrice) {
@@ -105,12 +93,15 @@ async function buy(currentPrice) {
 		});
 
 		const accountInfo = await client.accountInfo();
+
+		// USDT
 		const baseAssetBalance = parseFloat(
 			accountInfo.balances.find((asset) => asset.asset === baseAsset).free
 		);
 
 		const currentDate = new Date();
 
+		// BTC
 		const tradingAssetBalance = parseFloat(
 			accountInfo.balances.find((asset) => asset.asset === tradingAsset).free
 		);
@@ -127,7 +118,7 @@ async function buy(currentPrice) {
 			lastUpdated: currentDate,
 		};
 
-		const amount = parseFloat(tradingAmount) / parseFloat(currentPrice);
+		const amount = tradingAmount;
 
 		if (baseAssetBalance < tradingAmount) {
 			console.log(
@@ -147,7 +138,8 @@ async function buy(currentPrice) {
 			type: "MARKET",
 		});
 
-		buyPriceOrder = parseFloat(buyOrder.fills[0].price);
+		// buyPriceOrder = parseFloat(buyOrder.fills[0].price);
+		buyPriceOrder = parseFloat(currentPrice);
 
 		await Balance.findOneAndUpdate({ name: baseAsset }, balanceBaseAsset, {
 			upsert: true,
@@ -164,7 +156,7 @@ async function buy(currentPrice) {
 		const newOrder = new Order({
 			pair: tradingPair,
 			quantity: parseFloat(amount),
-			price: parseFloat(currentPrice),
+			price: parseFloat(buyPriceOrder),
 			side: "BUY",
 			lastUpdated: currentDate,
 		});
@@ -195,9 +187,11 @@ async function buy(currentPrice) {
 
 		console.log(
 			colors.red(
-				`[${formatDateTime(new Date())}] Compra efetuada: ${
-					buyOrder.fills[0].qty
-				} ${tradingAsset} por ${buyPriceOrder.toFixed(2)} ${baseAsset}`
+				`[${formatDateTime(
+					new Date()
+				)}] Compra efetuada: ${amount} ${tradingAsset} por ${buyPriceOrder.toFixed(
+					2
+				)} ${baseAsset}`
 			)
 		);
 		console.log(
@@ -207,14 +201,27 @@ async function buy(currentPrice) {
 				)}] Saldo atual: ${baseAssetBalance.toFixed(2)}`
 			)
 		);
-		buyPrice = parseFloat(buyOrder.fills[0].price);
+		buyPrice = parseFloat(buyPriceOrder);
 
-		beep(1); // Tocar beep no terminal quando ocorrer uma compra
+		// beep(1); // Tocar beep no terminal quando ocorrer uma compra
+
+		notifier.notify({
+			title: "Compra efetuada",
+			message: `${amount} ${tradingAsset} por ${buyPriceOrder.toFixed(
+				2
+			)} ${baseAsset}`,
+			// icon: 'caminho/para/o/icone.ico',
+			sound: true,
+			wait: false,
+		});
+
 		bot.sendMessage(
 			chatId,
-			`[${formatDateTime(new Date())}] Compra efetuada: ${
-				buyOrder.fills[0].qty
-			} ${tradingAsset} por ${buyPriceOrder.toFixed(2)} ${baseAsset}`
+			`[${formatDateTime(
+				new Date()
+			)}] Compra efetuada: ${amount} ${tradingAsset} por ${buyPriceOrder.toFixed(
+				2
+			)} ${baseAsset}`
 		);
 	} catch (error) {
 		console.error(`[${formatDateTime(new Date())}] Erro ao comprar:`, error);
@@ -228,7 +235,8 @@ async function saveSell(
 	sellOrder,
 	baseAssetBalance,
 	balanceBaseAsset,
-	balanceTradingAsset
+	balanceTradingAsset,
+	isStopLoss = false
 ) {
 	await Balance.findOneAndUpdate({ name: baseAsset }, balanceBaseAsset, {
 		upsert: true,
@@ -270,32 +278,86 @@ async function saveSell(
 		}
 	);
 
-	let sellPrice = parseFloat(sellOrder.fills[0].price);
+	// let sellPrice = parseFloat(sellOrder.fills[0].price);
+	let sellPrice = parseFloat(currentPrice);
 
-	console.log(
-		colors.green(
-			`[${formatDateTime(new Date())}] Venda efetuada: ${
-				sellOrder.fills[0].qty
-			} ${tradingAsset} por ${sellPrice.toFixed(2)} ${baseAsset}`
-		)
-	);
+	if (isStopLoss) {
+		console.log(
+			colors.green(
+				`[${formatDateTime(
+					new Date()
+				)}] Stop Loss efetuado: ${amount} ${tradingAsset} por ${sellPrice.toFixed(
+					2
+				)} ${baseAsset}`
+			)
+		);
 
-	console.log(
-		colors.yellow(
-			`[${formatDateTime(new Date())}] Saldo atual: ${baseAssetBalance.toFixed(
+		console.log(
+			colors.yellow(
+				`[${formatDateTime(
+					new Date()
+				)}] Saldo atual: ${baseAssetBalance.toFixed(2)}`
+			)
+		);
+
+		// beep(1); // Tocar beep no terminal quando ocorrer uma compra
+		notifier.notify({
+			title: "Stop Loss efetuado",
+			message: `${amount} ${tradingAsset} por ${sellPrice.toFixed(
 				2
-			)}`
-		)
-	);
+			)} ${baseAsset}`,
+			// icon: 'caminho/para/o/icone.ico',
+			sound: true,
+			wait: false,
+		});
 
-	beep(1); // Tocar beep no terminal quando ocorrer uma compra
+		bot.sendMessage(
+			chatId,
+			`[${formatDateTime(
+				new Date()
+			)}] Stop Loss efetuado: ${amount} ${tradingAsset} por ${sellPrice.toFixed(
+				2
+			)} ${baseAsset}`
+		);
+	} else {
+		console.log(
+			colors.green(
+				`[${formatDateTime(
+					new Date()
+				)}] Venda efetuada: ${amount} ${tradingAsset} por ${sellPrice.toFixed(
+					2
+				)} ${baseAsset}`
+			)
+		);
 
-	bot.sendMessage(
-		chatId,
-		`[${formatDateTime(new Date())}] Venda efetuada: ${
-			sellOrder.fills[0].qty
-		} ${tradingAsset} por ${sellPrice.toFixed(2)} ${baseAsset}`
-	);
+		console.log(
+			colors.yellow(
+				`[${formatDateTime(
+					new Date()
+				)}] Saldo atual: ${baseAssetBalance.toFixed(2)}`
+			)
+		);
+
+		// beep(1); // Tocar beep no terminal quando ocorrer uma compra
+		notifier.notify({
+			title: "Venda efetuada",
+			message: `${amount} ${tradingAsset} por ${sellPrice.toFixed(
+				2
+			)} ${baseAsset}`,
+			// icon: 'caminho/para/o/icone.ico',
+			sound: true,
+			wait: false,
+		});
+
+		bot.sendMessage(
+			chatId,
+			`[${formatDateTime(
+				new Date()
+			)}] Venda efetuada: ${amount} ${tradingAsset} por ${sellPrice.toFixed(
+				2
+			)} ${baseAsset}`
+		);
+	}
 }
 
 async function sell(currentPrice) {
@@ -323,7 +385,7 @@ async function sell(currentPrice) {
 			lastUpdated: currentDate,
 		};
 
-		const amount = parseFloat(tradingAmount) / parseFloat(currentPrice);
+		const amount = tradingAmount;
 
 		const stopLossPrice = buyPrice - buyPrice * 0.0005;
 
@@ -355,7 +417,8 @@ async function sell(currentPrice) {
 				sellOrder,
 				baseAssetBalance,
 				balanceBaseAsset,
-				balanceTradingAsset
+				balanceTradingAsset,
+				true
 			);
 		} else {
 			sellOrder = await client.order({
@@ -502,36 +565,53 @@ async function main() {
 				)
 			);
 		}
+		// let meiaNoite = isMidnight();
+		// const base = await Balance.findOne({ name: baseAsset });
+		// const trade = await Balance.findOne({ name: tradingAsset });
 
-		let meiaNoite = isMidnight();
-		const base = await Balance.findOne({ name: baseAsset });
-		const trade = await Balance.findOne({ name: tradingAsset });
+		// if (meiaNoite) {
+		// 	console.log(colors.zalgo("Iniciando histórico de saldo do dia..."));
+		// 	const newhistoricalBalanceBase = new HistoricalBalance({
+		// 		name: baseAsset,
+		// 		balance: parseFloat(base.balance),
+		// 		lastUpdated: new Date(),
+		// 	});
 
-		if (meiaNoite) {
-			const newHistoricalBalBase = new HistoricalBalance({
-				name: baseAsset,
-				balance: parseFloat(base.balance),
-				lastUpdated: new Date(),
-			});
+		// 	const newhistoricalBalanceTrade = new HistoricalBalance({
+		// 		name: tradingAsset,
+		// 		balance: parseFloat(trade.balance),
+		// 		lastUpdated: new Date(),
+		// 	});
 
-			const newHistoricalBalTrade = new HistoricalBalance({
-				name: tradingAsset,
-				balance: parseFloat(trade.balance),
-				lastUpdated: new Date(),
-			});
+		// 	newhistoricalBalanceBase.save();
+		// 	newhistoricalBalanceTrade.save();
 
-			newHistoricalBalTrade.save();
-			newHistoricalBalBase.save();
-		}
+		// 	console.log(colors.zalgo("Histórico de saldo do dia finalizado!"));
+		// }
 	} catch (error) {
 		console.error(`[${formatDateTime(new Date())}] Ocorreu um erro:`, error);
 	}
 }
 
-// bot.on("message", (msg) => {
-// 	console.log("Chat ID:", msg.chat.id);
-// });
+bot.on("message", async (msg) => {
+	let text = msg.text;
+	let saldos = await getBalances();
+	let preco = await getPrice();
 
-// startConfig();
+	switch (text) {
+		case "/saldo":
+			bot.sendMessage(
+				chatId,
+				`Saldo ${tradingAsset}: ${saldos.tradeAsset} - Saldo ${baseAsset}: ${saldos.baseAsset}`
+			);
+			break;
+		case "/preço":
+			bot.sendMessage(
+				chatId,
+				`Preço atual do ${tradingAsset}: ${preco} ${baseAsset}`
+			);
+			break;
+	}
+});
 
 setInterval(main, 5000);
